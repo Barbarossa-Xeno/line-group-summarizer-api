@@ -19,6 +19,7 @@
 	},
 	"homepage": "https://github.com/Barbarossa-Xeno/line-group-summarizer-api#readme",
 	"dependencies": {
+		"@google-cloud/firestore": "^9.0.1",
 		"@google-cloud/functions-framework": "^3.0.0",
 		"@google/genai": "^2.21.0",
 		"@line/bot-sdk": "^v11.2.0"
