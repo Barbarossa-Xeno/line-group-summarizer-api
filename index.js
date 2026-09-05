@@ -2,9 +2,6 @@ import { http } from '@google-cloud/functions-framework';
 import { GoogleGenAI } from '@google/genai';
 import * as line from "@line/bot-sdk";
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const LINE_API_TOKEN = process.env.LINE_API_TOKEN;
-
 // エントリーポイント
 http('main', async (req, res) => {
   res.set('Content-Type', 'text/plain');
@@ -18,7 +15,7 @@ http('main', async (req, res) => {
   }
 
   try {
-    const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     const response = await ai.models.generateContent({
       model: 'gemini-3.5-flash',
       contents: 'あなたのできることを簡単に教えて。'
@@ -32,6 +29,8 @@ http('main', async (req, res) => {
   }
 });
 
-// http('webhook', line.middleware({ channelSecret: process.env.LINE_API_SECRET }), (req, res) => {
-
-// });
+// LINE Message API の Webhook
+http('webhook', (req, res) => {
+	line.middleware({ channelSecret: process.env.LINE_API_SECRET });
+	return res.status(200).end();
+});
