@@ -31,6 +31,15 @@ http('main', async (req, res) => {
 
 // LINE Message API の Webhook
 http('webhook', (req, res) => {
-	line.middleware({ channelSecret: process.env.LINE_API_SECRET });
-	return res.status(200).end();
+	const isValid = line.validateSignature(req.rawBody, process.env.LINE_API_SECRET, req.headers['x-line-signature']);
+
+	if (!isValid) {
+		return res.status(401).send("Unauthorized");
+	}
+
+	for (const event of req.body.events) {
+		console.log(event);
+	}
+
+	return res.status(200).send("OK");
 });
