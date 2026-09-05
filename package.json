@@ -1,0 +1,26 @@
+{
+	"name": "line-group-summarizer-api",
+	"version": "1.0.0",
+	"description": "Deploy to Google Cloud Run Functions",
+	"main": "index.js",
+	"scripts": {
+		"test": "echo \"Error: no test specified\" && exit 1",
+		"run": "node --env-file=.env index.js"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/Barbarossa-Xeno/line-group-summarizer-api.git"
+	},
+	"author": "",
+	"license": "ISC",
+	"bugs": {
+		"url": "https://github.com/Barbarossa-Xeno/line-group-summarizer-api/issues"
+	},
+	"homepage": "https://github.com/Barbarossa-Xeno/line-group-summarizer-api#readme",
+	"dependencies": {
+		"@google-cloud/functions-framework": "^3.0.0",
+		"@google/genai": "^2.21.0",
+		"@line/bot-sdk": "^v11.2.0"
+	},
+	"type": "module"
+}
