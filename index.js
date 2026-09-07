@@ -76,7 +76,7 @@ http('main', async (req, res) => {
 						continue;
 					}
 
-					// TODO: LINEに送信する
+					// LINEに送信する
 					await client.replyMessage({ replyToken: event.replyToken, messages: [{ type: "text", text: summary }] });
 				} catch (eventError) {
 					console.error('[BG] Error in processing a event:', eventError);
@@ -132,7 +132,7 @@ async function checkSummarization(text) {
 	try {
 		const response = await ai.models.generateContent({
 			model: 'gemini-3.5-flash-lite',
-			contents: `あなたは「@まとめ丸」とします。次のメッセージが自分に対して「メッセージの要約」を要求しているものであると判断できる場合、「Y」とだけ返答してください。そうでない場合「N」とだけ返答してください。それ以外の返答はしないようにしてください。
+			contents: `${process.env.PROMPT_CHECK_SUMMARIZATION}
 			---
 			${text}
 			---`
@@ -191,7 +191,7 @@ async function summarize(event) {
 		// Gemini
 		const response = await ai.models.generateContent({
 			model: 'gemini-3.6-flash',
-			contents: `あなたは「まとめ丸」とします。以下に送るメッセージのリストを要約してください。LINEのトーク欄に送ることを考慮して、可能な限り短い字数にしてください。長くても6文程度で要約してください。会話の主な流れに沿った情報が抜け落ちないようにしてください。比較的平易な文体にし、少しだけ場の雰囲気に合わせてください。\n${listText}`
+			contents: `${process.env.PROMPT_SUMMARIZE}\n${listText}`
 		});
 
 		// 要約対象の中で最新のタイムスタンプ
