@@ -64,6 +64,7 @@ http('main', async (req, res) => {
 
 					// 要約判定して必要なければスキップ
 					// TODO: トークンの使用量が多ければ固定メッセージに変える
+					// TODO: 今までのサマリーを表示する機能があってもいいかも
 					if (!await checkSummarization(event.message.text)) {
 						continue;
 					}
@@ -82,7 +83,7 @@ http('main', async (req, res) => {
 
 					// エラーをLINEに送信
 					// FIXME: 今エラー文直送りなのでUXが悪い
-					await client.replyMessage({ replyToken: event.replyToken, messages: [{ type: "text", text: '[BG] Error in processing a event:', eventError }] });
+					await client.replyMessage({ replyToken: event.replyToken, messages: [{ type: "text", text: `[BG] Error in processing a event: ${eventError.message}` }] });
 				}
 			}
 
@@ -110,7 +111,8 @@ async function addMessageToDb(event) {
 			message: event.message.text,
 			createdAt: FieldValue.serverTimestamp(),
 			// TTL 用に正確な日付型で管理
-			expireAt: Timestamp.fromDate(process.env.DB_MESSAGE_EXPIRE_DAYS)
+			// 日単位をミリ秒に変換して現在の時刻に足す
+			expireAt: Timestamp.fromMillis(Date.now() + process.env.DB_MESSAGE_EXPIRE_DAYS * 24 * 60 * 60 * 1000)
 		});
 
 		console.log(`[addMessageToDb] User message added - ${event.message.id}`);
