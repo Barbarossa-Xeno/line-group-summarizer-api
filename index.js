@@ -10,7 +10,7 @@ const client = LineBotClient.fromChannelAccessToken({
 });
 
 // プロジェクトのデフォルトFirestoreクライアント
-const db = new Firestore();
+const db = new Firestore({ databaseId: "line-group-summarizer-api-db" });
 
 // Google AIクライアント
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
