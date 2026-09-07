@@ -1,12 +1,13 @@
 import { http } from '@google-cloud/functions-framework';
-import { Firestore } from "@google-cloud/firestore"
+import { Firestore, FieldValue, Timestamp } from "@google-cloud/firestore"
+import { field } from '@google-cloud/firestore/pipelines';
 import { GoogleGenAI } from '@google/genai';
 import { validateSignature, LineBotClient } from "@line/bot-sdk";
 
 // LINEクライアント
 const client = LineBotClient.fromChannelAccessToken({
-		channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN
-	});
+	channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN
+});
 
 // プロジェクトのデフォルトFirestoreクライアント
 const db = new Firestore();
@@ -29,7 +30,7 @@ http('main', async (req, res) => {
   /** LINEの署名を検証 */
   const isValid = validateSignature(req.rawBody, process.env.LINE_CHANNEL_SECRET, req.headers['x-line-signature']);
 
-  // 署名が有効でない場合（LINE外からのアクセス）は拒否
+  	// 署名が有効でない場合（LINE外からのアクセス）は拒否
 	if (!isValid) {
 		return res.status(401).send("Unauthorized");
 	}
@@ -43,10 +44,8 @@ http('main', async (req, res) => {
 		// もしエラーが出ればそのタイミングで終了
 		try {
 			for (const event of req.body.events) {
-
 				// 1つのイベントごとにもエラーハンドリング
 				try {
-
 					// 誰かから送信されたメッセージのイベント出ない場合スキップ
 					if (event.type !== "message" || event.message.type !== "text") {
 						continue;
@@ -69,13 +68,21 @@ http('main', async (req, res) => {
 						continue;
 					}
 
-					// TODO: 要約したのを送信
+					// 要約
+					const summary = await summarize(event);
 
+					if (!summary) {
+						continue;
+					}
+
+					// TODO: LINEに送信する
+					await client.replyMessage({ replyToken: event.replyToken, messages: [{ type: "text", text: summary }] });
 				} catch (eventError) {
 					console.error('[BG] Error in processing a event:', eventError);
 
-					// TODO: エラーをLINEに送信
-
+					// エラーをLINEに送信
+					// FIXME: 今エラー文直送りなのでUXが悪い
+					await client.replyMessage({ replyToken: event.replyToken, messages: [{ type: "text", text: '[BG] Error in processing a event:', eventError }] });
 				}
 			}
 
@@ -84,21 +91,6 @@ http('main', async (req, res) => {
 			console.error('[BG] Fatal error in main process loop: ', error);
 		}
 	})();
-
-	// 本処理
-  // try {
-  //   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-  //   const response = await ai.models.generateContent({
-  //     model: 'gemini-3.6-flash',
-  //     contents: 'あなたのできることを1文で簡単に教えて。'
-		// });
-
-  //   return res.send(response.text);
-  // }
-  // catch (error) {
-  //   console.error(error);
-  //   return res.status(500).send(error);
-  // }
 });
 
 /**
@@ -112,16 +104,19 @@ async function addMessageToDb(event) {
 	const keyId = event.source.groupId || event.source.roomId || event.source.userId;
 
 	try {
-		await db.collection(keyId).add({
+		await db.collection(`chats/${keyId}/messages`).add({
 			userId: event.source.userId,
 			messageId: event.message.id,
-			message: event.message.text
+			message: event.message.text,
+			createdAt: FieldValue.serverTimestamp(),
+			// TTL 用に正確な日付型で管理
+			expireAt: Timestamp.fromDate(process.env.DB_MESSAGE_EXPIRE_DAYS)
 		});
 
-		console.log(`User message added ${event.message.id}`);
+		console.log(`[addMessageToDb] User message added - ${event.message.id}`);
 	} catch (error) {
 		// 呼び出し元で分かりやすくするためにエラーをラップする
-		throw new Error(`Error adding user message (${event.message.id}): ${error}`);
+		throw new Error(`[addMessageToDb] Error adding user message (${event.message.id}): ${error.message}`, { cause: error });
 	}
 }
 
@@ -146,9 +141,90 @@ async function checkSummarization(text) {
 		} else if (response.text === 'N') {
 			return false;
 		} else {
-			throw new Error('AI generated unexpected response');
+			throw new Error('[checkSummarization] AI generated unexpected response');
 		}
 	} catch (error) {
-		throw new Error(`Error checking summarization: ${error}`);
+		throw new Error(`[checkSummarization] Error checking summarization: ${error.message}`, { cause: error });
+	}
+}
+
+/**
+ * 特定IDのチャット履歴を要約する
+ * 失敗した場合例外を投げる
+ * @param {{ source: { userId: string?, groupId: string?, roomId: string? }, message: { id: string, text: string } }} event
+ * @returns
+ */
+async function summarize(event) {
+	const keyId = event.source.groupId || event.source.roomId || event.source.userId;
+	try {
+		// IDごとのドキュメント取得
+		const chatDoc = await db.collection('chats').doc(keyId).get();
+
+		// ドキュメントの最終要約日時を取得
+		// undefined の場合まだ要約されたことがないので、UNIXエポックにしておく
+		const docsLastSummarizedAt = chatDoc.data()?.lastSummarizedAt || new Date(0);
+
+		// クエリのパイプライン化
+		// メッセージの中から > 最終要約日時以降に追加されたメッセージを抽出し > 昇順（古い順）に並べ替え > 100件まで取得
+		const pipeline = db.pipeline().collection(`chats/${keyId}/messages`)
+			.where(field('createdAt').greaterThan(docsLastSummarizedAt))
+			.sort(field('createdAt').ascending())
+			.limit(100);
+
+		// 該当メッセージ取得
+		const snapshot = await pipeline.execute();
+
+		// 該当するものが無ければ終了
+		if (snapshot.results.length === 0) {
+			return;
+		}
+
+		// 要約対象のメッセージを Markdown のリスト化
+		const listText = snapshot.results
+			.map((r) => r.data()?.message)
+			.filter((msg) => msg !== undefined && typeof msg === 'string')
+			.map((msg) => `- ${msg}`)
+			.join('\n');
+
+		// Gemini
+		const response = await ai.models.generateContent({
+			model: 'gemini-3.6-flash',
+			contents: `あなたは「まとめ丸」とします。以下に送るメッセージのリストを要約してください。LINEのトーク欄に送ることを考慮して、可能な限り短い字数にしてください。長くても6文程度で要約してください。会話の主な流れに沿った情報が抜け落ちないようにしてください。比較的平易な文体にし、少しだけ場の雰囲気に合わせてください。\n${listText}`
+		});
+
+		// 要約対象の中で最新のタイムスタンプ
+		const lastSummarizedAt = snapshot.results.at(-1).data().createdAt;
+
+		// バッチ処理はじめ
+		const batch = db.batch();
+
+		// 要約保存
+		batch.set(db.collection(`chats/${keyId}/summaries`).doc(), {
+			text: response.text,
+			// 要約対象の中で最新のタイムスタンプを参照する
+			summarizedAt: lastSummarizedAt,
+			// 何個のメッセージから要約したか
+			messageCount: snapshot.results.length,
+			createdAt: FieldValue.serverTimestamp()
+		});
+
+		// タイムスタンプ更新
+		batch.set(db.collection('chats').doc(keyId), {
+			lastSummarizedAt: lastSummarizedAt,
+			updatedAt: FieldValue.serverTimestamp()
+		}, {
+			// 既存フィールドを上書きするように
+			merge: true
+		});
+
+		// 要約保存とタイムスタンプ更新の両方を行う
+		// 原子性
+		await batch.commit();
+
+		console.log(`[summarize] Summary added - ${keyId}`);
+
+		return response.text;
+	} catch (error) {
+		throw new Error(`[summarize] Error summarization: ${error.message}`, { cause: error });
 	}
 }
