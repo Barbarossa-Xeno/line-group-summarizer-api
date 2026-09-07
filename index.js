@@ -58,7 +58,7 @@ http('main', async (req, res) => {
 
 					// 自分がメンションされていない場合は次に進む
 					// メンションそのものが無い場合でもスキップ
-					if (event.message?.mention?.some((m) => m.isSelf === false)) {
+					if (event.message?.mention?.mentionees?.some((m) => m.isSelf === false)) {
 						continue;
 					}
 
